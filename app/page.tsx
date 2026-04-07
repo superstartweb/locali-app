@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 import { 
   MapPin, Star, Phone, Navigation, Plus, Search, 
   Pizza, Wine, Utensils, Coffee, X, Check, Heart, 
-  Smile, GlassWater, Home as HomeIcon, Trash2, Beef, Fish
+  Smile, GlassWater, Home as HomeIcon, Trash2, Beef, Fish, Globe
 } from 'lucide-react'
 
 const supabase = createClient(
@@ -32,10 +32,10 @@ export default function Home() {
   const [newLocale, setNewLocale] = useState({
     id: null as string | null, nome: '', indirizzo: '', telefono: '', 
     rating_cibo: 0, rating_vino: 0, rating_servizio: 0, 
-    categoria: 'Carne', note: '', lat: 0, lng: 0, visitato: false
+    categoria: 'Carne', note: '', lat: null as number | null, lng: null as number | null, visitato: false
   })
 
-  // 1. Attivazione GPS ad alta precisione
+  // 1. Chiediamo la posizione dell'utente solo per il filtro, non per il salvataggio automatico
   useEffect(() => {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition((pos) => {
@@ -44,7 +44,6 @@ export default function Home() {
     }
   }, [])
 
-  // 2. Caricamento locali con filtri rigorosi
   useEffect(() => { fetchLocali() }, [userPos, raggio, catSelezionata, soloVisitati, searchTerm])
 
   const fetchLocali = async () => {
@@ -52,24 +51,24 @@ export default function Home() {
     let finalData = []
 
     if (searchTerm) {
-      // Se cerchi per nome, il raggio viene ignorato (perché vuoi trovare quel posto specifico)
       const { data } = await supabase.from('locali').select('*').ilike('nome', `%${searchTerm}%`).order('created_at', { ascending: false })
       finalData = data || []
     } else if (userPos) {
-      // FILTRO RIGOROSO: Mostra solo ciò che rientra nel raggio dei KM impostati
-      const { data, error } = await supabase.rpc('vicini_a_me', { 
-        lat: userPos.lat, 
-        lng: userPos.lng, 
-        raggio_km: raggio 
-      })
-      if (!error) finalData = data
+      // Prendiamo quelli nel raggio
+      const { data: vicini } = await supabase.rpc('vicini_a_me', { lat: userPos.lat, lng: userPos.lng, raggio_km: raggio })
+      // Prendiamo TUTTI per recuperare quelli senza GPS (Instagram)
+      const { data: tutti } = await supabase.from('locali').select('*').order('created_at', { ascending: false })
+      
+      const idsVicini = new Set((vicini || []).map((v: any) => v.id))
+      // Quelli "Lontani" o "Senza GPS"
+      const extra = (tutti || []).filter((t: any) => !idsVicini.has(t.id))
+      
+      finalData = [...(vicini || []), ...extra]
     } else {
-      // Se il GPS è spento, mostriamo tutto in ordine cronologico
       const { data } = await supabase.from('locali').select('*').order('created_at', { ascending: false })
       finalData = data || []
     }
 
-    // Applicazione filtri Categoria e Visitati
     if (catSelezionata !== 'Tutti') finalData = finalData.filter((l: any) => l.categoria === catSelezionata)
     if (soloVisitati) finalData = finalData.filter((l: any) => l.visitato === true)
 
@@ -80,40 +79,43 @@ export default function Home() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     const isVisitato = newLocale.rating_cibo > 0 || newLocale.visitato;
+    
+    // Se lat/lng sono nulli, passiamo 0 per la funzione SQL
     const { error } = await supabase.rpc('save_locale', {
       n_id: newLocale.id, n_nome: newLocale.nome, n_indirizzo: newLocale.indirizzo, n_telefono: newLocale.telefono,
       n_rating_cibo: newLocale.rating_cibo, n_rating_vino: newLocale.rating_vino, n_rating_servizio: newLocale.rating_servizio,
-      n_categoria: newLocale.categoria, n_note: newLocale.note || '', n_lat: newLocale.lat, n_lng: newLocale.lng, n_visitato: isVisitato
+      n_categoria: newLocale.categoria, n_note: newLocale.note || '', 
+      n_lat: newLocale.lat || 0, n_lng: newLocale.lng || 0, n_visitato: isVisitato
     })
     if (!error) { setIsModalOpen(false); fetchLocali(); resetForm() }
   }
 
   const handleDelete = async () => {
     if (!newLocale.id || !confirm("Eliminare questa stella? ✨")) return
-    const { error } = await supabase.from('locali').delete().eq('id', newLocale.id)
-    if (!error) { setIsModalOpen(false); fetchLocali(); resetForm() }
+    await supabase.from('locali').delete().eq('id', newLocale.id)
+    setIsModalOpen(false); fetchLocali(); resetForm()
   }
 
   const resetForm = () => {
-    setNewLocale({ id: null, nome: '', indirizzo: '', telefono: '', rating_cibo: 0, rating_vino: 0, rating_servizio: 0, categoria: 'Carne', note: '', lat: 0, lng: 0, visitato: false })
+    setNewLocale({ id: null, nome: '', indirizzo: '', telefono: '', rating_cibo: 0, rating_vino: 0, rating_servizio: 0, categoria: 'Carne', note: '', lat: null, lng: null, visitato: false })
   }
 
   return (
     <main className="min-h-screen bg-[#fcfcfd] text-slate-900 pb-40 font-sans">
       
-      {/* HEADER CALIBRATO */}
+      {/* HEADER */}
       <div className="bg-white/95 backdrop-blur-xl sticky top-0 z-40 border-b border-slate-100 p-6 space-y-4 shadow-sm">
         <div className="max-w-xl mx-auto">
           <div className="flex justify-between items-center mb-4">
             <div>
-              <h1 className="text-2xl font-black tracking-tighter italic text-slate-900 leading-none">FIGLI DELLE STELLE ✨</h1>
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">Distanza sotto controllo</p>
+              <h1 className="text-2xl font-black tracking-tighter italic text-slate-900">FIGLI DELLE STELLE ✨</h1>
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">La tua mappa del gusto</p>
             </div>
             <button onClick={() => { resetForm(); setIsModalOpen(true) }} className="bg-slate-900 text-white p-4 rounded-2xl shadow-xl active:scale-90"><Plus size={24}/></button>
           </div>
 
-          <div className="relative group">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-amber-500" size={18}/>
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/>
             <input 
               ref={searchRef}
               type="text" 
@@ -124,7 +126,7 @@ export default function Home() {
             />
           </div>
           
-          <div className="flex gap-2 overflow-x-auto py-2 no-scrollbar">
+          <div className="flex gap-2 overflow-x-auto py-1 no-scrollbar">
             {['Tutti', 'Carne', 'Pesce', 'Pizza', 'Vino', 'Bistrot'].map((cat) => (
               <button key={cat} onClick={() => setCatSelezionata(cat)} className={`px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase transition-all border ${catSelezionata === cat ? 'bg-amber-400 border-amber-400 text-white shadow-lg' : 'bg-white border-slate-100 text-slate-400'}`}> {cat} </button>
             ))}
@@ -133,35 +135,30 @@ export default function Home() {
           {!searchTerm && (
             <div className="bg-slate-50 p-4 rounded-[2rem] border border-slate-100">
                <div className="flex justify-between items-center mb-2 px-1">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Filtra per raggio (KM)</span>
-                  <span className="text-xs font-black bg-white px-2 py-1 rounded-lg shadow-sm">{raggio} km</span>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Raggio vicini</span>
+                  <span className="text-xs font-black">{raggio} km</span>
                </div>
-               <input 
-                  type="range" min="1" max="50" step="1" 
-                  value={raggio} 
-                  onChange={(e) => setRaggio(parseInt(e.target.value))} 
-                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none accent-slate-900 cursor-pointer"
-               />
+               <input type="range" min="1" max="50" value={raggio} onChange={(e) => setRaggio(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none accent-slate-900 cursor-pointer"/>
             </div>
           )}
         </div>
       </div>
 
-      {/* LISTA FILTRATA */}
+      {/* LISTA */}
       <div className="max-w-xl mx-auto p-5 space-y-6">
         {locali.map((l) => (
-          <div key={l.id} onClick={() => {setNewLocale({...l, note: l.note || '', lat: l.posizione?.coordinates?.[1] || 0, lng: l.posizione?.coordinates?.[0] || 0}); setIsModalOpen(true)}} className={`bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden transition-all active:scale-[0.98] ${l.rating_cibo === 1 ? 'opacity-60' : ''}`}>
+          <div key={l.id} onClick={() => {setNewLocale({...l, note: l.note || '', lat: l.posizione?.coordinates?.[1] || null, lng: l.posizione?.coordinates?.[0] || null}); setIsModalOpen(true)}} className={`bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden transition-all active:scale-[0.98] ${l.rating_cibo === 1 ? 'opacity-60' : ''}`}>
             
-            {/* ETICHETTA DISTANZA PRECISA */}
-            <div className="absolute top-6 left-6 bg-slate-900 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase shadow-md z-10">
-               {l.distanza_km != null ? (l.distanza_km < 1 ? `${Math.round(l.distanza_km * 1000)} m` : `${l.distanza_km.toFixed(1)} km`) : 'Posizione N.D.'}
+            {/* DISTANZA O FALLBACK */}
+            <div className={`absolute top-6 left-6 px-3 py-1 rounded-full text-[9px] font-black uppercase shadow-md ${l.distanza_km && l.distanza_km < 50 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}>
+               {l.distanza_km && l.distanza_km < 50 ? (l.distanza_km < 1 ? `${Math.round(l.distanza_km * 1000)} m` : `${l.distanza_km.toFixed(1)} km`) : <div className="flex items-center gap-1"><Globe size={10}/> Instagram / Web</div>}
             </div>
 
-            <div className="absolute top-6 right-6 flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 text-slate-400">
-               {iconMap[l.categoria]} <span className="text-[9px] font-black uppercase tracking-widest">{l.categoria}</span>
+            <div className="absolute top-6 right-6 flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 text-slate-400 text-[9px] font-black uppercase tracking-widest">
+               {iconMap[l.categoria]} {l.categoria}
             </div>
 
-            <div className="mt-10 mb-6">
+            <div className="mt-8 mb-6">
               <h3 className="text-2xl font-black mb-3 text-slate-900 leading-tight">{l.nome}</h3>
               {l.visitato ? (
                 <div className="flex gap-4 bg-slate-50/50 p-4 rounded-3xl border border-slate-50 text-[10px] font-black uppercase text-slate-400">
@@ -172,58 +169,47 @@ export default function Home() {
               ) : (
                 <div className="bg-amber-50/50 p-4 rounded-3xl border border-amber-100 flex justify-between items-center px-6">
                    <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Da Provare ✨</span>
-                   <span className="text-[9px] font-bold text-amber-500 underline uppercase tracking-tighter">Vota</span>
+                   <span className="text-[9px] font-bold text-amber-500 underline uppercase">Vota</span>
                 </div>
               )}
             </div>
-
             <div className="grid grid-cols-2 gap-3">
                 <button onClick={(e) => { e.stopPropagation(); window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.nome + ' ' + l.indirizzo)}`) }} className="py-4 bg-slate-900 text-white font-black text-[11px] uppercase rounded-2xl flex items-center justify-center gap-2 shadow-lg"> <Navigation size={14}/> Naviga </button>
                 <a onClick={(e) => e.stopPropagation()} href={`tel:${l.telefono}`} className="py-4 bg-slate-100 text-slate-900 font-black text-[11px] uppercase rounded-2xl flex items-center justify-center gap-2 border border-slate-200"> <Phone size={14}/> Chiama </a>
             </div>
           </div>
         ))}
-        
-        {locali.length === 0 && (
-          <div className="p-20 text-center text-slate-300 font-bold italic space-y-4">
-            <p>Nessun locale nel raggio di {raggio}km.</p>
-            <button onClick={() => setRaggio(50)} className="bg-slate-100 text-slate-600 px-6 py-2 rounded-full text-[10px] font-black uppercase">Espandi a 50km</button>
-          </div>
-        )}
       </div>
 
       {/* FOOTER */}
       <div className="fixed bottom-8 inset-x-0 flex justify-center z-50 px-6 pointer-events-none">
         <div className="bg-slate-900/95 backdrop-blur-xl text-white px-10 py-5 rounded-[2.5rem] shadow-2xl flex items-center gap-14 border border-white/10 pointer-events-auto">
-           <button onClick={() => { window.scrollTo({top: 0, behavior: 'smooth'}); setSoloVisitati(false); setCatSelezionata('Tutti'); setSearchTerm(''); setRaggio(5) }} className={!soloVisitati && !searchTerm ? 'text-amber-400' : 'text-white/30'}><HomeIcon size={24} strokeWidth={2.5}/></button>
+           <button onClick={() => { window.scrollTo({top: 0, behavior: 'smooth'}); setSoloVisitati(false); setCatSelezionata('Tutti'); setSearchTerm('') }} className={!soloVisitati && !searchTerm ? 'text-amber-400' : 'text-white/30'}><HomeIcon size={24} strokeWidth={2.5}/></button>
            <button onClick={() => { window.scrollTo({top: 0, behavior: 'smooth'}); searchRef.current?.focus() }} className={searchTerm ? 'text-amber-400' : 'text-white/30'}><Search size={24} strokeWidth={2.5}/></button>
            <button onClick={() => setSoloVisitati(!soloVisitati)} className={soloVisitati ? 'text-amber-400' : 'text-white/30'}><Heart size={24} strokeWidth={2.5} fill={soloVisitati ? "currentColor" : "none"}/></button>
         </div>
       </div>
 
-      {/* MODAL SISTEMATO */}
+      {/* MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex flex-col justify-end">
-          <div className="w-full flex justify-end p-6">
-             <button onClick={() => setIsModalOpen(false)} className="bg-white/10 text-white p-4 rounded-full active:scale-90 border border-white/20"><X size={28}/></button>
-          </div>
+          <div className="w-full flex justify-end p-6"><button onClick={() => setIsModalOpen(false)} className="bg-white/10 text-white p-4 rounded-full active:scale-90 border border-white/20"><X size={28}/></button></div>
           <div className="bg-white w-full rounded-t-[3rem] p-8 pb-20 shadow-2xl max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-full duration-500 relative">
-            <h2 className="text-2xl font-black italic text-slate-900 mb-8 border-b border-slate-50 pb-4">{newLocale.id ? 'Modifica Stella' : 'Nuova Stella ✨'}</h2>
+            <h2 className="text-2xl font-black italic text-slate-900 mb-8 border-b border-slate-50 pb-4">{newLocale.id ? 'Aggiorna Stella' : 'Nuova Stella ✨'}</h2>
             <form onSubmit={handleSave} className="space-y-6">
               <input type="text" placeholder="Nome locale" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-2 ring-amber-400" value={newLocale.nome} onChange={e => setNewLocale({...newLocale, nome: e.target.value})} />
-              
               <div className="grid grid-cols-2 gap-4">
                 <select className="p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none text-sm" value={newLocale.categoria} onChange={e => setNewLocale({...newLocale, categoria: e.target.value})}>
                   {['Carne', 'Pesce', 'Pizza', 'Vino', 'Bistrot', 'Caffè'].map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
                 <div className="bg-slate-50 rounded-2xl flex items-center justify-center gap-3 p-3">
                    <input type="checkbox" id="v" checked={newLocale.visitato} onChange={e => setNewLocale({...newLocale, visitato: e.target.checked})} className="w-6 h-6 accent-amber-500" />
-                   <label htmlFor="v" className="text-[10px] font-black uppercase text-slate-500">Provato</label>
+                   <label htmlFor="v" className="text-[10px] font-black uppercase text-slate-500">Già Visitato</label>
                 </div>
               </div>
 
               {(newLocale.visitato || newLocale.rating_cibo > 0) && (
-                <div className="space-y-5 bg-slate-50 p-6 rounded-3xl border border-amber-100/30">
+                <div className="space-y-5 bg-slate-50 p-6 rounded-3xl border border-amber-100/30 shadow-inner">
                   {[
                     { label: 'Cibo 🍕', k: 'rating_cibo', ic: Star, col: '#f59e0b' },
                     { label: 'Vino 🍷', k: 'rating_vino', ic: GlassWater, col: '#be185d' },
@@ -233,9 +219,7 @@ export default function Home() {
                       <span className="text-[10px] font-black uppercase text-slate-400">{r.label}</span>
                       <div className="flex gap-1">
                         {[...Array(5)].map((_, i) => (
-                          <button type="button" key={i} onClick={() => setNewLocale({...newLocale, [r.k]: i+1})} className="active:scale-125 transition-transform">
-                            <r.ic size={32} fill={i < (newLocale as any)[r.k] ? r.col : "none"} color={i < (newLocale as any)[r.k] ? r.col : "#cbd5e1"} strokeWidth={2.5}/>
-                          </button>
+                          <button type="button" key={i} onClick={() => setNewLocale({...newLocale, [r.k]: i+1})} className="active:scale-125 transition-transform"><r.ic size={32} fill={i < (newLocale as any)[r.k] ? r.col : "none"} color={i < (newLocale as any)[r.k] ? r.col : "#cbd5e1"} strokeWidth={2.5}/></button>
                         ))}
                       </div>
                     </div>
@@ -245,14 +229,15 @@ export default function Home() {
 
               <div className="relative">
                 <input type="text" placeholder="Indirizzo" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none pr-14" value={newLocale.indirizzo} onChange={e => setNewLocale({...newLocale, indirizzo: e.target.value})} />
-                <button type="button" onClick={() => { setNewLocale({...newLocale, lat: userPos?.lat || 0, lng: userPos?.lng || 0}); alert("GPS Sincronizzato!") }} className="absolute right-2 top-2 p-3 bg-white text-amber-500 rounded-xl shadow-sm border border-slate-100"> <MapPin size={24}/> </button>
+                <button type="button" onClick={() => { setNewLocale({...newLocale, lat: userPos?.lat || 0, lng: userPos?.lng || 0}); alert("Posizione Attuale Salvata! 📡") }} className={`absolute right-2 top-2 p-3 rounded-xl shadow-sm border transition-all ${newLocale.lat ? 'bg-amber-400 text-white' : 'bg-white text-amber-500'}`}> <MapPin size={24}/> </button>
+                <p className="text-[8px] text-slate-300 mt-1 uppercase font-black pl-2 italic">Usa il tasto GPS solo se sei lì fisicamente</p>
               </div>
 
-              <input type="text" placeholder="Telefono (opzionale)" className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none" value={newLocale.telefono} onChange={e => setNewLocale({...newLocale, telefono: e.target.value})} />
-              <textarea placeholder="Note..." className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none h-24" value={newLocale.note || ''} onChange={e => setNewLocale({...newLocale, note: e.target.value})}></textarea>
+              <input type="text" placeholder="Telefono" className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none" value={newLocale.telefono} onChange={e => setNewLocale({...newLocale, telefono: e.target.value})} />
+              <textarea placeholder="Note personali..." className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none h-24" value={newLocale.note || ''} onChange={e => setNewLocale({...newLocale, note: e.target.value})}></textarea>
               
               <div className="space-y-4 pt-4">
-                 <button type="submit" className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase shadow-2xl active:scale-95 transition-all"> <Check size={20}/> SALVA STELLA </button>
+                 <button type="submit" className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase shadow-2xl active:scale-95"> <Check size={20}/> SALVA STELLA </button>
                  {newLocale.id && <button type="button" onClick={handleDelete} className="w-full py-4 text-rose-500 font-black text-[11px] uppercase flex items-center justify-center gap-2 border border-rose-50 rounded-2xl active:bg-rose-50"> <Trash2 size={16}/> ELIMINA </button>}
               </div>
             </form>
