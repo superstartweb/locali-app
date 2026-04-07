@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 import { 
   MapPin, Star, Phone, Navigation, Plus, Search, 
   Pizza, Wine, Utensils, Coffee, X, Check, Heart, 
-  Smile, GlassWater, Home as HomeIcon, Trash2, Beef, Fish
+  Smile, GlassWater, Home as HomeIcon, Trash2, Beef, Fish, Map as MapIcon
 } from 'lucide-react'
 
 const supabase = createClient(
@@ -39,10 +39,7 @@ export default function Home() {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition((pos) => {
         setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-      }, (err) => {
-        console.log("GPS non autorizzato");
-        setLoading(false)
-      }, { enableHighAccuracy: true })
+      }, (err) => { setLoading(false) }, { enableHighAccuracy: true })
     }
   }, [])
 
@@ -50,34 +47,43 @@ export default function Home() {
 
   const fetchLocali = async () => {
     setLoading(true)
-    let data_locali = []
+    let finalData = []
 
-    if (userPos && searchTerm === '') {
-      // Ricerca per posizione
-      const { data, error } = await supabase.rpc('vicini_a_me', { lat: userPos.lat, lng: userPos.lng, raggio_km: raggio })
-      if (!error) data_locali = data
+    if (searchTerm) {
+      // RICERCA PER NOME: Ignora distanze, mostra tutto
+      const { data } = await supabase.from('locali').select('*').ilike('nome', `%${searchTerm}%`).order('created_at', { ascending: false })
+      finalData = data || []
+    } else if (userPos) {
+      // LOGICA IBRIDA: Vicini (entro raggio) + Quelli senza posizione (Lontani)
+      const { data: vicini } = await supabase.rpc('vicini_a_me', { lat: userPos.lat, lng: userPos.lng, raggio_km: raggio })
+      
+      // Prendiamo anche quelli "senza GPS" per non farli sparire
+      const { data: tutti } = await supabase.from('locali').select('*').order('created_at', { ascending: false })
+      
+      const idsVicini = new Set((vicini || []).map((v: any) => v.id))
+      const lontani = (tutti || []).filter((t: any) => !idsVicini.has(t.id))
+      
+      finalData = [...(vicini || []), ...lontani]
     } else {
-      // Ricerca testuale o fallback (se il GPS è off o sto cercando un nome)
-      let query = supabase.from('locali').select('*')
-      if (searchTerm) query = query.ilike('nome', `%${searchTerm}%`)
-      const { data } = await query.order('created_at', { ascending: false })
-      data_locali = data || []
+      const { data } = await supabase.from('locali').select('*').order('created_at', { ascending: false })
+      finalData = data || []
     }
 
-    // Filtri Categoria e Preferiti
-    if (catSelezionata !== 'Tutti') data_locali = data_locali.filter((l: any) => l.categoria === catSelezionata)
-    if (soloVisitati) data_locali = data_locali.filter((l: any) => l.visitato === true)
+    // Filtri Categoria e Cuore
+    if (catSelezionata !== 'Tutti') finalData = finalData.filter((l: any) => l.categoria === catSelezionata)
+    if (soloVisitati) finalData = finalData.filter((l: any) => l.visitato === true)
 
-    setLocali(data_locali)
+    setLocali(finalData)
     setLoading(false)
   }
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    const isVisitato = newLocale.rating_cibo > 0 || newLocale.visitato;
     const { error } = await supabase.rpc('save_locale', {
       n_id: newLocale.id, n_nome: newLocale.nome, n_indirizzo: newLocale.indirizzo, n_telefono: newLocale.telefono,
       n_rating_cibo: newLocale.rating_cibo, n_rating_vino: newLocale.rating_vino, n_rating_servizio: newLocale.rating_servizio,
-      n_categoria: newLocale.categoria, n_note: newLocale.note || '', n_lat: newLocale.lat, n_lng: newLocale.lng, n_visitato: newLocale.rating_cibo > 0 || newLocale.visitato
+      n_categoria: newLocale.categoria, n_note: newLocale.note || '', n_lat: newLocale.lat, n_lng: newLocale.lng, n_visitato: isVisitato
     })
     if (!error) { setIsModalOpen(false); fetchLocali(); resetForm() }
   }
@@ -95,8 +101,8 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#fcfcfd] text-slate-900 pb-40 font-sans">
       
-      {/* HEADER DINAMICO */}
-      <div className="bg-white/95 backdrop-blur-xl sticky top-0 z-40 border-b border-slate-100 p-6 space-y-5 shadow-sm">
+      {/* HEADER FISSO */}
+      <div className="bg-white/95 backdrop-blur-xl sticky top-0 z-40 border-b border-slate-100 p-6 space-y-4 shadow-sm">
         <div className="max-w-xl mx-auto">
           <div className="flex justify-between items-center mb-4">
             <div>
@@ -106,29 +112,28 @@ export default function Home() {
             <button onClick={() => { resetForm(); setIsModalOpen(true) }} className="bg-slate-900 text-white p-4 rounded-2xl shadow-xl active:scale-90"><Plus size={24}/></button>
           </div>
 
-          {/* BARRA DI RICERCA TESTUALE */}
-          <div className="relative group mb-4">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-amber-500 transition-colors" size={18}/>
+          <div className="relative group">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-amber-500" size={18}/>
             <input 
               ref={searchRef}
               type="text" 
-              placeholder="Cerca un locale per nome..." 
+              placeholder="Cerca per nome..." 
               className="w-full bg-slate-50 p-4 pl-12 rounded-2xl font-bold border-2 border-transparent focus:border-amber-400 outline-none transition-all text-sm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           
-          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+          <div className="flex gap-2 overflow-x-auto py-2 no-scrollbar">
             {['Tutti', 'Carne', 'Pesce', 'Pizza', 'Vino', 'Bistrot'].map((cat) => (
               <button key={cat} onClick={() => setCatSelezionata(cat)} className={`px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase transition-all border ${catSelezionata === cat ? 'bg-amber-400 border-amber-400 text-white shadow-lg' : 'bg-white border-slate-100 text-slate-400'}`}> {cat} </button>
             ))}
           </div>
 
           {!searchTerm && (
-            <div className="bg-slate-50 p-4 rounded-[2rem] border border-slate-100 mt-2">
+            <div className="bg-slate-50 p-4 rounded-[2rem] border border-slate-100">
                <div className="flex justify-between items-center mb-2 px-1">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Filtra per raggio</span>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filtra vicini</span>
                   <span className="text-xs font-black">{raggio} km</span>
                </div>
                <input type="range" min="1" max="50" value={raggio} onChange={(e) => setRaggio(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none accent-slate-900 cursor-pointer"/>
@@ -141,13 +146,15 @@ export default function Home() {
       <div className="max-w-xl mx-auto p-5 space-y-6">
         {locali.map((l) => (
           <div key={l.id} onClick={() => {setNewLocale({...l, note: l.note || '', lat: l.posizione?.coordinates?.[1] || 0, lng: l.posizione?.coordinates?.[0] || 0}); setIsModalOpen(true)}} className={`bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden transition-all active:scale-[0.98] ${l.rating_cibo === 1 ? 'opacity-60' : ''}`}>
+            
             <div className="absolute top-6 left-6 bg-slate-900 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase">
                {l.distanza_km ? (l.distanza_km < 1 ? `${Math.round(l.distanza_km * 1000)} m` : `${l.distanza_km.toFixed(1)} km`) : 'Lontano 📍'}
             </div>
-            <div className="absolute top-6 right-6 flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
-               <span className="text-slate-400">{iconMap[l.categoria]}</span>
-               <span className="text-[9px] font-black uppercase text-slate-500">{l.categoria}</span>
+
+            <div className="absolute top-6 right-6 flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 text-slate-400">
+               {iconMap[l.categoria]} <span className="text-[9px] font-black uppercase tracking-widest">{l.categoria}</span>
             </div>
+
             <div className="mt-8 mb-6">
               <h3 className="text-2xl font-black mb-3 text-slate-900 leading-tight">{l.nome}</h3>
               {l.visitato ? (
@@ -163,21 +170,16 @@ export default function Home() {
                 </div>
               )}
             </div>
+
             <div className="grid grid-cols-2 gap-3">
                 <button onClick={(e) => { e.stopPropagation(); window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.nome + ' ' + l.indirizzo)}`) }} className="py-4 bg-slate-900 text-white font-black text-[11px] uppercase rounded-2xl flex items-center justify-center gap-2 shadow-lg"> <Navigation size={14}/> Naviga </button>
                 <a onClick={(e) => e.stopPropagation()} href={`tel:${l.telefono}`} className="py-4 bg-slate-100 text-slate-900 font-black text-[11px] uppercase rounded-2xl flex items-center justify-center gap-2 border border-slate-200"> <Phone size={14}/> Chiama </a>
             </div>
           </div>
         ))}
-        {locali.length === 0 && !loading && (
-          <div className="p-20 text-center text-slate-300 font-bold italic space-y-2">
-            <p>Nessuna stella trovata.</p>
-            <button onClick={() => {setSearchTerm(''); setRaggio(50)}} className="text-xs text-amber-500 underline uppercase font-black">Mostra tutti</button>
-          </div>
-        )}
       </div>
 
-      {/* FOOTER NAV FUNZIONANTE */}
+      {/* FOOTER NAV */}
       <div className="fixed bottom-8 inset-x-0 flex justify-center z-50 px-6 pointer-events-none">
         <div className="bg-slate-900/95 backdrop-blur-xl text-white px-10 py-5 rounded-[2.5rem] shadow-2xl flex items-center gap-14 border border-white/10 pointer-events-auto">
            <button onClick={() => { window.scrollTo({top: 0, behavior: 'smooth'}); setSoloVisitati(false); setCatSelezionata('Tutti'); setSearchTerm('') }} className={!soloVisitati && !searchTerm ? 'text-amber-400' : 'text-white/30'}><HomeIcon size={24} strokeWidth={2.5}/></button>
@@ -186,7 +188,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* MODAL EDIT / ADD */}
+      {/* MODAL SISTEMATO */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex flex-col justify-end">
           <div className="w-full flex justify-end p-6">
@@ -196,22 +198,23 @@ export default function Home() {
             <h2 className="text-2xl font-black italic text-slate-900 mb-8 border-b border-slate-50 pb-4">{newLocale.id ? 'Modifica Stella' : 'Nuova Stella ✨'}</h2>
             <form onSubmit={handleSave} className="space-y-6">
               <input type="text" placeholder="Nome locale" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-2 ring-amber-400" value={newLocale.nome} onChange={e => setNewLocale({...newLocale, nome: e.target.value})} />
+              
               <div className="grid grid-cols-2 gap-4">
                 <select className="p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none text-sm" value={newLocale.categoria} onChange={e => setNewLocale({...newLocale, categoria: e.target.value})}>
                   {['Carne', 'Pesce', 'Pizza', 'Vino', 'Bistrot', 'Caffè'].map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
-                <div className="bg-slate-50 rounded-2xl flex items-center justify-center gap-3 p-3 border-2 border-transparent">
+                <div className="bg-slate-50 rounded-2xl flex items-center justify-center gap-3 p-3">
                    <input type="checkbox" id="v" checked={newLocale.visitato} onChange={e => setNewLocale({...newLocale, visitato: e.target.checked})} className="w-6 h-6 accent-amber-500" />
                    <label htmlFor="v" className="text-[10px] font-black uppercase text-slate-500">Provato</label>
                 </div>
               </div>
 
               {(newLocale.visitato || newLocale.rating_cibo > 0) && (
-                <div className="space-y-5 bg-slate-50 p-6 rounded-3xl border border-amber-100/30">
+                <div className="space-y-5 bg-slate-50 p-6 rounded-3xl border border-amber-100/30 shadow-inner">
                   {[
                     { label: 'Cibo 🍕', k: 'rating_cibo', ic: Star, col: '#f59e0b' },
                     { label: 'Vino 🍷', k: 'rating_vino', ic: GlassWater, col: '#be185d' },
-                    { label: 'Ospitalità 😊', k: 'rating_servizio', ic: Smile, col: '#0ea5e9' }
+                    { label: 'Servizio 😊', k: 'rating_servizio', ic: Smile, col: '#0ea5e9' }
                   ].map((r) => (
                     <div key={r.k} className="flex justify-between items-center">
                       <span className="text-[10px] font-black uppercase text-slate-400">{r.label}</span>
@@ -230,9 +233,10 @@ export default function Home() {
               <div className="relative">
                 <input type="text" placeholder="Indirizzo" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none pr-14" value={newLocale.indirizzo} onChange={e => setNewLocale({...newLocale, indirizzo: e.target.value})} />
                 <button type="button" onClick={() => { setNewLocale({...newLocale, lat: userPos?.lat || 0, lng: userPos?.lng || 0}); alert("GPS Preso! 📡") }} className="absolute right-2 top-2 p-3 bg-white text-amber-500 rounded-xl shadow-sm border border-slate-100 active:scale-90"> <MapPin size={24}/> </button>
+                <p className="text-[8px] text-slate-300 mt-1 uppercase font-black pl-2 italic">Usa il tasto GPS solo se sei lì fisicamente</p>
               </div>
 
-              <input type="text" placeholder="Telefono (es. +39...)" className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none" value={newLocale.telefono} onChange={e => setNewLocale({...newLocale, telefono: e.target.value})} />
+              <input type="text" placeholder="Telefono (opzionale)" className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none" value={newLocale.telefono} onChange={e => setNewLocale({...newLocale, telefono: e.target.value})} />
               <textarea placeholder="Note personali..." className="w-full p-5 bg-slate-50 rounded-2xl font-bold border-none outline-none h-24" value={newLocale.note || ''} onChange={e => setNewLocale({...newLocale, note: e.target.value})}></textarea>
               
               <div className="space-y-4 pt-4">
