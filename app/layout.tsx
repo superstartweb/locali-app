@@ -1,17 +1,33 @@
-{
-  "name": "Figli delle Stelle",
-  "short_name": "Stelle",
-  "description": "I miei locali preferiti",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#000000",
-  "icons": [
-    {
-      "src": "/icon.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
-  ]
+import type { Metadata, Viewport } from "next";
+import "./globals.css";
+
+// Next.js troverà automaticamente manifest.ts e favicon.ico/icon.png
+export const metadata: Metadata = {
+  title: "Figli delle Stelle ✨",
+  description: "I miei locali preferiti",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Stelle",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#ffffff",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="it">
+      <body className="antialiased">{children}</body>
+    </html>
+  );
 }
