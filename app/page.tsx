@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 import { 
   MapPin, Star, Phone, Navigation, Plus, Search, 
   Pizza, Wine, Utensils, Coffee, Store, X, Check, Heart, 
-  Smile, GlassWater, Home as HomeIcon, Trash2
+  Smile, GlassWater, Home as HomeIcon, Trash2, Edit3
 } from 'lucide-react'
 
 const supabase = createClient(
@@ -38,7 +38,7 @@ export default function Home() {
         const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude }
         setUserPos(coords); 
         setNewLocale(prev => ({ ...prev, lat: coords.lat, lng: coords.lng }))
-      }, (err) => console.error("Errore GPS"), { enableHighAccuracy: true })
+      }, (err) => console.error("GPS error"), { enableHighAccuracy: true })
     }
   }, [])
 
@@ -47,9 +47,7 @@ export default function Home() {
   const fetchLocali = async () => {
     if (!userPos) return;
     setLoading(true)
-    const { data, error } = await supabase.rpc('vicini_a_me', { 
-      lat: userPos.lat, lng: userPos.lng, raggio_km: raggio 
-    })
+    const { data, error } = await supabase.rpc('vicini_a_me', { lat: userPos.lat, lng: userPos.lng, raggio_km: raggio })
     if (!error) {
       let filtered = data
       if (catSelezionata !== 'Tutti') filtered = data.filter((l: any) => l.categoria === catSelezionata)
@@ -67,17 +65,28 @@ export default function Home() {
       n_categoria: newLocale.categoria, n_note: newLocale.note || '',
       n_lat: newLocale.lat, n_lng: newLocale.lng, n_visitato: isVisitato
     })
-    if (!error) { setIsModalOpen(false); fetchLocali(); resetForm() }
+    if (!error) { setIsModalOpen(false); fetchLocali(); resetForm() } else { alert("Errore salvataggio") }
   }
 
-  const deleteLocale = async (id: string) => {
-    if (!confirm("Vuoi eliminare questa stella? ✨")) return
-    await supabase.from('locali').delete().eq('id', id)
-    fetchLocali()
+  const handleDelete = async (id: string) => {
+    if (!confirm("Vuoi rimuovere questo locale dai Figli delle Stelle? ✨")) return
+    const { error } = await supabase.from('locali').delete().eq('id', id)
+    if (!error) fetchLocali()
   }
 
   const resetForm = () => {
     setNewLocale({ id: null, nome: '', indirizzo: '', telefono: '', rating_cibo: 0, rating_vino: 0, rating_servizio: 0, categoria: 'Ristorante', note: '', lat: userPos?.lat || 0, lng: userPos?.lng || 0, visitato: false })
+  }
+
+  const openForEdit = (l: any) => {
+    setNewLocale({
+      ...l,
+      note: l.note || '',
+      telefono: l.telefono || '',
+      lat: l.posizione?.coordinates?.[1] || userPos?.lat || 0,
+      lng: l.posizione?.coordinates?.[0] || userPos?.lng || 0
+    })
+    setIsModalOpen(true)
   }
 
   const RenderRating = ({ val, icon: Icon, color }: any) => (
@@ -89,16 +98,17 @@ export default function Home() {
   )
 
   return (
-    <main className="min-h-screen bg-[#fcfcfd] text-slate-900 pb-32 font-sans">
+    <main className="min-h-screen bg-[#fcfcfd] text-slate-900 pb-32 font-sans selection:bg-amber-100">
       
+      {/* HEADER */}
       <div className="bg-white/95 backdrop-blur-xl sticky top-0 z-40 border-b border-slate-100 p-6 space-y-6">
         <div className="max-w-xl mx-auto">
           <div className="flex justify-between items-center mb-6">
             <div>
               <h1 className="text-2xl font-black tracking-tighter">FIGLI DELLE STELLE ✨</h1>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Cerca, Prova, Ricorda</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Curated Local Guide</p>
             </div>
-            <button onClick={() => { resetForm(); setIsModalOpen(true) }} className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl active:scale-90 transition-all"><Plus size={24}/></button>
+            <button onClick={() => { resetForm(); setIsModalOpen(true) }} className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all"><Plus size={24}/></button>
           </div>
           
           <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar">
@@ -109,7 +119,7 @@ export default function Home() {
 
           <div className="bg-slate-50 p-5 rounded-[2rem] border border-slate-100 shadow-inner">
             <div className="flex justify-between items-end mb-3 px-1">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Filtra per distanza</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Raggio d'azione</span>
               <span className="text-sm font-black text-slate-900">{raggio} <span className="text-[10px] text-slate-400 italic">km</span></span>
             </div>
             <input type="range" min="1" max="50" value={raggio} onChange={(e) => setRaggio(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"/>
@@ -117,32 +127,34 @@ export default function Home() {
         </div>
       </div>
 
+      {/* LISTA LOCALI */}
       <div className="max-w-xl mx-auto p-5 space-y-6">
-        {!userPos && loading ? (
-          <div className="p-20 text-center flex flex-col items-center gap-4">
-            <div className="w-8 h-8 border-4 border-slate-100 border-t-amber-500 rounded-full animate-spin"></div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sincronizzazione GPS...</p>
-          </div>
+        {loading && !locali.length ? (
+          <div className="p-20 text-center animate-pulse text-slate-300 font-black uppercase text-[10px] tracking-[0.3em]">Allineamento Stelle...</div>
         ) : (
           <div className="grid gap-6">
             {locali.map((l) => (
-              <div key={l.id} className={`bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden transition-all ${l.rating_cibo === 1 ? 'opacity-60 grayscale-[0.5]' : ''}`}>
+              <div key={l.id} className={`bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden transition-all group ${l.rating_cibo === 1 ? 'opacity-60 grayscale-[0.3]' : ''}`}>
                 
-                {/* KM DI DISTANZA */}
-                <div className="absolute top-6 left-6 bg-slate-900 text-white px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase">
+                {/* DISTANZA */}
+                <div className="absolute top-6 left-6 bg-slate-900 text-white px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase shadow-md">
                   {l.distanza_km < 1 ? `${Math.round(l.distanza_km * 1000)} m` : `${l.distanza_km.toFixed(1)} km`}
                 </div>
 
+                {/* TAG & ELIMINA */}
                 <div className="absolute top-6 right-6 flex items-center gap-2">
                    <div className="flex items-center gap-1 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
                      <span className="text-slate-400">{iconMap[l.categoria]}</span>
                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{l.categoria}</span>
                    </div>
-                   <button onClick={() => deleteLocale(l.id)} className="p-1.5 bg-red-50 text-red-400 rounded-full hover:bg-red-500 hover:text-white transition-all"><Trash2 size={14}/></button>
+                   <button onClick={() => handleDelete(l.id)} className="p-2 bg-rose-50 text-rose-400 rounded-full hover:bg-rose-500 hover:text-white transition-all opacity-0 group-hover:opacity-100"><Trash2 size={14}/></button>
                 </div>
 
                 <div className="mt-8 mb-6">
-                  <h3 className="text-2xl font-black mb-2 text-slate-900 leading-tight">{l.nome}</h3>
+                  <div className="flex justify-between items-start">
+                    <h3 className="text-2xl font-black mb-2 text-slate-900 leading-tight pr-8">{l.nome}</h3>
+                    <button onClick={() => openForEdit(l)} className="p-2 text-slate-300 hover:text-amber-500 transition-colors"><Edit3 size={18}/></button>
+                  </div>
                   
                   {l.visitato ? (
                     <div className="space-y-2 bg-slate-50/50 p-4 rounded-3xl border border-slate-50">
@@ -151,16 +163,28 @@ export default function Home() {
                       <div className="flex items-center justify-between"><span className="text-[9px] font-black uppercase text-slate-400">Servizio</span><RenderRating val={l.rating_servizio} icon={Smile} color="#0ea5e9" /></div>
                     </div>
                   ) : (
-                    <div className="bg-amber-50 p-4 rounded-3xl border border-amber-100 flex items-center justify-between">
-                       <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Da Provare ✨</span>
-                       <button onClick={() => { setNewLocale({...l, note: l.note || '', lat: l.posizione?.coordinates?.[1], lng: l.posizione?.coordinates?.[0]}); setIsModalOpen(true) }} className="bg-white text-amber-600 px-5 py-2 rounded-full text-[10px] font-black shadow-sm border border-amber-100 uppercase">Vota ora</button>
+                    <div className="bg-amber-50/50 p-4 rounded-3xl border border-amber-100/50 flex items-center justify-between">
+                       <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest flex items-center gap-1.5"><Heart size={10} fill="currentColor"/> Da Provare</span>
+                       <button onClick={() => openForEdit(l)} className="bg-white text-amber-600 px-5 py-2 rounded-full text-[10px] font-black shadow-sm border border-amber-100 uppercase active:scale-95 transition-all">Vota Ora ✨</button>
                     </div>
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 mb-2">
-                    <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.nome + ' ' + l.indirizzo)}`)} className="py-4 bg-slate-900 text-white font-black text-[11px] uppercase rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-slate-200"> <Navigation size={14}/> Naviga </button>
-                    <a href={`tel:${l.telefono}`} className="py-4 bg-slate-100 text-slate-900 font-black text-[11px] uppercase rounded-2xl flex items-center justify-center gap-2 border border-slate-200"> <Phone size={14}/> Chiama </a>
+                {/* AZIONI RAPIDE */}
+                <div className="grid grid-cols-2 gap-3">
+                    <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.nome + ' ' + l.indirizzo)}`)} 
+                       className="py-4 bg-slate-900 text-white font-black text-[11px] uppercase rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-slate-200"> 
+                       <Navigation size={14}/> Naviga 
+                    </button>
+                    {l.telefono ? (
+                        <a href={`tel:${l.telefono}`} className="py-4 bg-white text-slate-900 font-black text-[11px] uppercase rounded-2xl flex items-center justify-center gap-2 border border-slate-200 shadow-sm active:bg-slate-50"> 
+                          <Phone size={14}/> Chiama 
+                        </a>
+                    ) : (
+                        <button onClick={() => openForEdit(l)} className="py-4 bg-slate-50 text-slate-300 font-black text-[11px] uppercase rounded-2xl flex items-center justify-center gap-2 border border-dashed border-slate-200 italic"> 
+                          Aggiungi Tel. 
+                        </button>
+                    )}
                 </div>
               </div>
             ))}
@@ -168,65 +192,72 @@ export default function Home() {
         )}
       </div>
 
+      {/* FOOTER NAVIGATION */}
       <div className="fixed bottom-8 inset-x-0 flex justify-center z-50 px-6 pointer-events-none">
         <div className="bg-slate-900/95 backdrop-blur-xl text-white px-10 py-5 rounded-[2.5rem] shadow-2xl flex items-center gap-14 border border-white/10 pointer-events-auto">
-           <button onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})} className="text-amber-400"><HomeIcon size={24} strokeWidth={2.5}/></button>
-           <button className="text-white/40"><Search size={24} strokeWidth={2.5}/></button>
-           <button className="text-white/40"><Heart size={24} strokeWidth={2.5}/></button>
+           <button onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})} className="text-amber-400 hover:scale-110 transition-transform"><HomeIcon size={24} strokeWidth={2.5}/></button>
+           <button className="text-white/30"><Search size={24} strokeWidth={2.5}/></button>
+           <button className="text-white/30"><Heart size={24} strokeWidth={2.5}/></button>
         </div>
       </div>
 
+      {/* MODAL MODIFICA/INSERIMENTO */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-xl rounded-[3rem] p-8 shadow-2xl animate-in slide-in-from-bottom-full duration-500">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-black italic">{newLocale.id ? 'Recensisci Locale' : 'Nuova Stella ✨'}</h2>
-              <button onClick={() => setIsModalOpen(false)} className="bg-slate-100 p-2 rounded-full text-slate-400"><X size={20}/></button>
+              <h2 className="text-2xl font-black italic tracking-tight">{newLocale.id ? 'Aggiorna Stella' : 'Nuova Stella ✨'}</h2>
+              <button onClick={() => setIsModalOpen(false)} className="bg-slate-100 p-2 rounded-full text-slate-400 hover:bg-slate-200 transition-colors"><X size={20}/></button>
             </div>
 
             <form onSubmit={handleSave} className="space-y-4">
-              <input type="text" placeholder="Nome locale" required disabled={!!newLocale.id} className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none outline-none disabled:opacity-50" value={newLocale.nome} onChange={e => setNewLocale({...newLocale, nome: e.target.value})} />
+              <input type="text" placeholder="Nome locale" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-2 ring-amber-400 transition-all" value={newLocale.nome} onChange={e => setNewLocale({...newLocale, nome: e.target.value})} />
               
               <div className="grid grid-cols-2 gap-3">
                 <select className="p-4 bg-slate-50 rounded-2xl font-bold border-none outline-none text-sm" value={newLocale.categoria} onChange={e => setNewLocale({...newLocale, categoria: e.target.value})}>
                   {['Pizza', 'Vino', 'Bistrot', 'Caffè', 'Ristorante'].map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
-                <div className="bg-slate-50 rounded-2xl flex items-center justify-center gap-2 p-3">
-                   <input type="checkbox" id="v" checked={newLocale.visitato} onChange={e => setNewLocale({...newLocale, visitato: e.target.checked})} className="w-6 h-6 accent-amber-500" />
-                   <label htmlFor="v" className="text-[10px] font-black uppercase text-slate-500">Già Visitato</label>
+                <div className="bg-slate-50 rounded-2xl flex items-center justify-center gap-3 p-3">
+                   <input type="checkbox" id="v" checked={newLocale.visitato} onChange={e => setNewLocale({...newLocale, visitato: e.target.checked})} className="w-6 h-6 accent-amber-500 rounded" />
+                   <label htmlFor="v" className="text-[10px] font-black uppercase text-slate-500 cursor-pointer">Già Visitato</label>
                 </div>
               </div>
 
-              {(newLocale.visitato || newLocale.rating_cibo > 0) && (
-                <div className="space-y-4 bg-slate-50 p-6 rounded-3xl border border-amber-100/50">
-                  {[
-                    { label: 'Cibo 🍕', key: 'rating_cibo', icon: Star, color: '#f59e0b' },
-                    { label: 'Vino 🍷', key: 'rating_vino', icon: GlassWater, color: '#be185d' },
-                    { label: 'Servizio 😊', key: 'rating_servizio', icon: Smile, color: '#0ea5e9' }
-                  ].map((r) => (
-                    <div key={r.key} className="flex justify-between items-center">
-                      <span className="text-[10px] font-black uppercase text-slate-500">{r.label}</span>
-                      <div className="flex gap-1">
-                        {[...Array(5)].map((_, i) => (
-                          <button type="button" key={i} onClick={() => setNewLocale({...newLocale, [r.key]: i+1})}>
-                            <r.icon size={24} fill={i < (newLocale as any)[r.key] ? r.color : "none"} color={i < (newLocale as any)[r.key] ? r.color : "#cbd5e1"} strokeWidth={2.5}/>
-                          </button>
-                        ))}
-                      </div>
+              {/* SEMPRE VISIBILI: LE VALUTAZIONI */}
+              <div className="space-y-4 bg-slate-50 p-6 rounded-[2rem] border border-amber-100/30 shadow-inner">
+                {[
+                  { label: 'Cibo 🍕', key: 'rating_cibo', icon: Star, color: '#f59e0b' },
+                  { label: 'Vino 🍷', key: 'rating_vino', icon: GlassWater, color: '#be185d' },
+                  { label: 'Ospitalità 😊', key: 'rating_servizio', icon: Smile, color: '#0ea5e9' }
+                ].map((r) => (
+                  <div key={r.key} className="flex justify-between items-center">
+                    <span className="text-[10px] font-black uppercase text-slate-500">{r.label}</span>
+                    <div className="flex gap-1.5">
+                      {[...Array(5)].map((_, i) => (
+                        <button type="button" key={i} onClick={() => setNewLocale({...newLocale, [r.key]: i+1})} className="hover:scale-110 transition-transform">
+                          <r.icon size={26} fill={i < (newLocale as any)[r.key] ? r.color : "none"} color={i < (newLocale as any)[r.key] ? r.color : "#cbd5e1"} strokeWidth={2.5}/>
+                        </button>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </div>
 
               <div className="relative">
-                <input type="text" placeholder="Indirizzo o Numero di Telefono" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none outline-none" value={newLocale.indirizzo} onChange={e => setNewLocale({...newLocale, indirizzo: e.target.value})} />
-                <button type="button" onClick={() => { setNewLocale({...newLocale, lat: userPos?.lat || 0, lng: userPos?.lng || 0}); alert("GPS Sincronizzato! 📡") }} className="absolute right-2 top-2 p-2 bg-white text-amber-500 rounded-xl shadow-sm border border-slate-100"> <MapPin size={24}/> </button>
+                <input type="text" placeholder="Indirizzo" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none outline-none pr-14" value={newLocale.indirizzo} onChange={e => setNewLocale({...newLocale, indirizzo: e.target.value})} />
+                <button type="button" onClick={() => { setNewLocale({...newLocale, lat: userPos?.lat || 0, lng: userPos?.lng || 0}); alert("GPS Sincronizzato! 📡") }} className="absolute right-2 top-2 p-2 bg-white text-amber-500 rounded-xl shadow-sm border border-slate-100 active:scale-90 transition-all"> <MapPin size={24}/> </button>
               </div>
 
-              <input type="text" placeholder="Telefono (opzionale)" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none outline-none" value={newLocale.telefono} onChange={e => setNewLocale({...newLocale, telefono: e.target.value})} />
+              <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl border-none">
+                 <Phone size={18} className="text-slate-300"/>
+                 <input type="text" placeholder="Numero di telefono (es. +39...)" className="bg-transparent w-full font-bold outline-none" value={newLocale.telefono} onChange={e => setNewLocale({...newLocale, telefono: e.target.value})} />
+              </div>
 
-              <textarea placeholder="Cosa ti ha colpito?" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none outline-none h-20" value={newLocale.note || ''} onChange={e => setNewLocale({...newLocale, note: e.target.value})}></textarea>
-              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase shadow-2xl flex items-center justify-center gap-2 active:scale-95 transition-all"> <Check size={20}/> Salva Stella </button>
+              <textarea placeholder="Note personali, piatti consigliati..." className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none outline-none h-24 focus:ring-2 ring-amber-200 transition-all" value={newLocale.note || ''} onChange={e => setNewLocale({...newLocale, note: e.target.value})}></textarea>
+              
+              <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-sm uppercase shadow-2xl flex items-center justify-center gap-2 active:scale-95 transition-all"> 
+                <Check size={20}/> {newLocale.id ? 'Salva Modifiche' : 'Aggiungi ai Preferiti'} 
+              </button>
             </form>
           </div>
         </div>
